@@ -1,0 +1,81 @@
+name: StudentGradeSystem CI/CD Pipeline
+
+on:
+push:
+branches: [ main ]
+pull_request:
+branches: [ main ]
+
+jobs:
+ci-and-quality-gates:
+name: CI Build &amp; Quality Gates
+runs-on: ubuntu-latest
+
+steps:
+- name: Checkout repository code
+uses: actions/checkout@v4
+
+- name: Install build, test, and analysis tools
+run: |
+sudo apt-get update
+sudo apt-get install -y cmake g++ libgtest-dev cppcheck
+
+- name: Quality Gate 1 - Configure &amp; Build Project
+run: |
+cmake -S . -B build
+cmake --build build
+
+- name: Quality Gate 2 - Run Automated Unit Tests
+run: |
+cd build
+
+ctest --output-on-failure
+
+- name: Quality Gate 3 - Enforce 80% Code Coverage Threshold
+run: |
+COVERAGE=$(gcov -o build/CMakeFiles/GradeSystemTests.dir/src
+src/GradeCalculator.cpp | grep &quot;Lines executed:&quot; | head -1 | sed -E &#39;s/.*:([0-
+9]+)\..*/\1/&#39;)
+echo &quot;Measured Line Coverage: ${COVERAGE}%&quot;
+if [ &quot;$COVERAGE&quot; -lt 80 ]; then
+echo &quot;QUALITY GATE FAILED: Coverage (${COVERAGE}%) is below the 80%
+minimum!&quot;
+exit 1
+fi
+echo &quot;QUALITY GATE PASSED: Coverage (${COVERAGE}%) &gt;= 80%&quot;
+
+- name: Quality Gate 4 - Static Code Analysis (cppcheck)
+run: |
+cppcheck --enable=warning,performance,portability --error-exitcode=1 src/
+
+- name: Archive Build Artifact
+uses: actions/upload-artifact@v4
+with:
+name: GradeSystem-Linux-Binary
+path: build/GradeSystem
+
+cd-deploy-pipeline:
+name: CD Staging &amp; Production Deployment
+needs: ci-and-quality-gates
+if: github.ref == &#39;refs/heads/main&#39; &amp;&amp; github.event_name == &#39;push&#39;
+
+runs-on: ubuntu-latest
+
+steps:
+- name: Checkout deployment scripts
+uses: actions/checkout@v4
+
+- name: Download verified build artifact
+uses: actions/download-artifact@v4
+with:
+name: GradeSystem-Linux-Binary
+path: build/
+
+- name: Deploy to Staging &amp; Run Smoke Test
+run: |
+chmod +x deploy.sh
+./deploy.sh staging
+
+- name: Deploy to Production &amp; Verify Health
+run: |
+./deploy.sh production
